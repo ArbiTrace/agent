@@ -1,0 +1,22 @@
+{
+  "name": "arbitrace-agent",
+  "version": "1.0.0",
+  "description": "ArbiTrace - AI-Powered Arbitrage Trading Agent",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "npx hardhat agent",
+    "dev": "tsc && npx hardhat agent",
+    "watch": "tsc --watch"
+  },
+  "dependencies": {
+    "dotenv": "^16.0.3"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-ethers": "^3.0.0",
+    "@types/node": "^20.0.0",
+    "hardhat": "^2.19.0",
+    "typescript": "^5.0.0"
+  }
+}
