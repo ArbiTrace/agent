@@ -8,9 +8,12 @@
     "build": "tsc",
     "start": "npx hardhat agent",
     "dev": "tsc && npx hardhat agent",
-    "watch": "tsc --watch"
+    "watch": "tsc --watch",
+    "check-models": "tsc scripts/check-gemini-models.ts"
   },
   "dependencies": {
+    "@google/genai": "^1.37.0",
+    "@google/generative-ai": "^0.24.1",
     "dotenv": "^16.0.3"
   },
   "devDependencies": {

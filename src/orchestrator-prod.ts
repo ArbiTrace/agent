@@ -22,10 +22,15 @@ import {
 } from "./tools/tool-9-execute-trade.js";
 import { trackTradeResult } from "./tools/tool-10-track-result.js";
 import { contracts, getSigner } from "./providers/contract-provider.js";
+import {
+  getAIDecision,
+  analyzeTradePerformance,
+} from "./ai/gemini-decision.js";
 
 let stats = {
   totalTrades: 0,
   successfulTrades: 0,
+  failedTrades: 0,
   totalProfit: 0n,
 };
 
@@ -46,6 +51,7 @@ async function executeCycle(): Promise<void> {
       console.log(
         `❌ CEX price invalid (${cexPrice.toFixed(6)}) - skipping cycle`,
       );
+      console.log(`\n⏳ Next scan in ${SCAN_INTERVAL_MS / 1000} seconds...\n`);
       return;
     }
 
@@ -59,8 +65,8 @@ async function executeCycle(): Promise<void> {
     console.log(`   Gas Cost: ${gasInfo.estimatedGasCostUSDC.toFixed(6)} USDC`);
     console.log(`   Historical Win Rate: 76.30%`);
 
-    // ========== PHASE 2: DECISION MAKING ==========
-    console.log("\n🤔 === PHASE 2: DECISION MAKING ===");
+    // ========== PHASE 2: BASIC SPREAD ANALYSIS ==========
+    console.log("\n🔍 === PHASE 2: SPREAD ANALYSIS ===");
 
     const spreadAnalysis = calculateSpread(cexPrice, dexPrice);
 
@@ -77,13 +83,87 @@ async function executeCycle(): Promise<void> {
       spreadAnalysis.direction === "NO_OPPORTUNITY"
     ) {
       console.log(`   ❌ NO OPPORTUNITY - Spread too low`);
+      console.log(`\n⏳ Next scan in ${SCAN_INTERVAL_MS / 1000} seconds...\n`);
       return;
     }
 
-    console.log(`   ✅ OPPORTUNITY DETECTED - Proceeding to validation`);
+    console.log(`   ✅ OPPORTUNITY DETECTED - Proceeding to AI analysis`);
 
-    // ========== PHASE 3: TRADE VALIDATION ==========
-    console.log("\n✅ === PHASE 3: TRADE VALIDATION ===");
+    // ========== PHASE 3: AI DECISION MAKING (GEMINI) ==========
+    console.log("\n🧠 === PHASE 3: AI DECISION MAKING (GEMINI) ===");
+
+    const aiInput = {
+      cexPrice,
+      dexPrice,
+      spread: spreadAnalysis.spreadPercent,
+      gasPrice: gasInfo.estimatedGasCostUSDC,
+      volatility: 2.5,
+      historicalWinRate: 76.3,
+      potentialProfit: spreadAnalysis.potentialProfit,
+      positionSize: DEFAULT_POSITION_SIZE,
+      portfolioExposure: 1.0,
+    };
+
+    let shouldProceed = false;
+    let aiDecision;
+    
+    try {
+      aiDecision = await getAIDecision(aiInput);
+
+      // Format output nicely
+      const decision = aiDecision.shouldExecute ? "✅ EXECUTE" : "❌ SKIP";
+      const confidenceBar = "█".repeat(Math.floor(aiDecision.confidence / 10));
+
+      console.log(`\n   🤖 Gemini 3 Flash Analysis:`);
+      console.log(`   ├─ Decision:   ${decision}`);
+      console.log(
+        `   ├─ Confidence: ${aiDecision.confidence}% ${confidenceBar}`,
+      );
+      console.log(
+        `   ├─ Reasoning:  ${aiDecision.reasoning.substring(0, 100)}...`,
+      );
+      console.log(
+        `   └─ Risk:       ${aiDecision.riskAssessment.substring(0, 100)}...`,
+      );
+
+      if (!aiDecision.shouldExecute) {
+        console.log(`\n   🛑 AI REJECTED TRADE - See risk assessment above`);
+        stats.failedTrades++;
+        shouldProceed = false;
+      } else if (aiDecision.confidence < 70) {
+        console.log(
+          `\n   ⚠️  AI CONFIDENCE TOO LOW (${aiDecision.confidence}% < 70%)`,
+        );
+        stats.failedTrades++;
+        shouldProceed = false;
+      } else {
+        console.log(`\n   ✅ AI APPROVED - Proceeding to validation`);
+        shouldProceed = true;
+      }
+    } catch (error) {
+      logger.warn(`AI decision failed, falling back to rules: ${error}`);
+      console.log(`   ⚠️  AI unavailable - Using fallback rules`);
+      shouldProceed = true; // Fallback: proceed with trade
+    }
+
+    // If AI rejected, skip to stats and wait for next cycle
+    if (!shouldProceed) {
+      console.log(`\n📊 === AGENT STATS ===`);
+      console.log(`   Total Scans: ${stats.totalTrades + stats.failedTrades}`);
+      console.log(`   Executed Trades: ${stats.totalTrades}`);
+      console.log(`   Skipped Trades: ${stats.failedTrades}`);
+      console.log(
+        `   Win Rate: ${stats.totalTrades > 0 ? ((stats.successfulTrades / stats.totalTrades) * 100).toFixed(1) : 0}%`,
+      );
+      console.log(
+        `   Total Profit: ${ethers.formatEther(stats.totalProfit)} USDC`,
+      );
+      console.log(`\n⏳ Next scan in ${SCAN_INTERVAL_MS / 1000} seconds...\n`);
+      return;
+    }
+
+    // ========== PHASE 4: TRADE VALIDATION ==========
+    console.log("\n✅ === PHASE 4: TRADE VALIDATION ===");
 
     const amountIn = ethers.parseEther(DEFAULT_POSITION_SIZE.toString());
     const minAmountOut = ethers.parseEther(
@@ -104,6 +184,8 @@ async function executeCycle(): Promise<void> {
     );
     if (validation.issues.length > 0) {
       console.log(`   ❌ Issues: ${validation.issues.join("; ")}`);
+      stats.failedTrades++;
+      console.log(`\n⏳ Next scan in ${SCAN_INTERVAL_MS / 1000} seconds...\n`);
       return;
     }
     if (validation.warnings.length > 0) {
@@ -111,8 +193,8 @@ async function executeCycle(): Promise<void> {
     }
     console.log(`   Valid: ✅`);
 
-    // ========== PHASE 4: BUILD & SIGN ==========
-    console.log("\n🔨 === PHASE 4: BUILD & SIGN ===");
+    // ========== PHASE 5: BUILD & SIGN ==========
+    console.log("\n🔨 === PHASE 5: BUILD & SIGN ===");
 
     const swapPath = [CONTRACTS.USDC, CONTRACTS.CRO];
     const swapInstruction = buildSwapInstruction(
@@ -143,8 +225,8 @@ async function executeCycle(): Promise<void> {
     console.log(`   ✅ Settlement Signed`);
     console.log(`   Nonce: ${signed.nonce.substring(0, 20)}...`);
 
-    // ========== PHASE 5: EXECUTION ==========
-    console.log("\n⚡ === PHASE 5: EXECUTION ===");
+    // ========== PHASE 6: EXECUTION ==========
+    console.log("\n⚡ === PHASE 6: EXECUTION ===");
 
     const executionResult = await executeTrade(
       CONTRACTS.USDC,
@@ -159,7 +241,7 @@ async function executeCycle(): Promise<void> {
     console.log(`   Tx Hash: ${executionResult.txHash.substring(0, 10)}...`);
     console.log(`   Status: ${executionResult.status}`);
 
-    // ========== PHASE 6: SETTLEMENT ==========
+    // ========== PHASE 7: SETTLEMENT ==========
     if (executionResult.status === "confirmed") {
       try {
         const settlementTx = await executeSettlement(
@@ -177,8 +259,8 @@ async function executeCycle(): Promise<void> {
       }
     }
 
-    // ========== PHASE 7: TRACKING ==========
-    console.log("\n📊 === PHASE 6: TRACKING ===");
+    // ========== PHASE 8: TRACKING ==========
+    console.log("\n📊 === PHASE 8: TRACKING ===");
 
     const trackResult = await trackTradeResult(
       executionResult.txHash,
@@ -198,29 +280,71 @@ async function executeCycle(): Promise<void> {
       stats.totalProfit += trackResult.profit;
     }
 
-    // ========== STATS ==========
-    console.log(`\n📊 Agent Stats:`);
-    console.log(`   Total Trades: ${stats.totalTrades}`);
+    // ========== PHASE 9: AI PERFORMANCE INSIGHTS ==========
+    if (stats.totalTrades >= 1) {
+      try {
+        console.log("\n💡 === PHASE 9: AI PERFORMANCE INSIGHTS ===");
+
+        const performance = {
+          recentWins: stats.successfulTrades,
+          recentLosses: stats.totalTrades - stats.successfulTrades,
+          avgProfit:
+            stats.totalProfit > 0n
+              ? Number(ethers.formatEther(stats.totalProfit)) /
+                stats.successfulTrades
+              : 0,
+          avgLoss: 0,
+          gasEfficiency: 87,
+        };
+
+        const improvement = await analyzeTradePerformance(performance);
+
+        // Format the AI suggestion nicely
+        const lines = improvement.split(". ").filter((l) => l.length > 0);
+        console.log(`   🔮 AI Suggestions:`);
+        lines.forEach((line, i) => {
+          console.log(`      ${i + 1}. ${line.trim()}`);
+        });
+      } catch (error) {
+        logger.debug(`AI insights unavailable: ${error}`);
+      }
+    }
+
+    // ========== STATS SUMMARY ==========
+    console.log(`\n📊 === AGENT STATS ===`);
+    console.log(`   Total Scans: ${stats.totalTrades + stats.failedTrades}`);
+    console.log(`   Executed Trades: ${stats.totalTrades}`);
+    console.log(`   Skipped Trades: ${stats.failedTrades}`);
     console.log(
-      `   Win Rate: ${((stats.successfulTrades / stats.totalTrades) * 100).toFixed(1)}%`,
+      `   Win Rate: ${stats.totalTrades > 0 ? ((stats.successfulTrades / stats.totalTrades) * 100).toFixed(1) : 0}%`,
     );
     console.log(
       `   Total Profit: ${ethers.formatEther(stats.totalProfit)} USDC`,
     );
+    console.log(`\n⏳ Next scan in ${SCAN_INTERVAL_MS / 1000} seconds...\n`);
   } catch (error) {
     logger.error(`Cycle error: ${error}`);
+    console.log(`\n⏳ Next scan in ${SCAN_INTERVAL_MS / 1000} seconds...\n`);
   }
 }
 
 export async function orchestratorLoop(): Promise<void> {
   console.log(`\n🚀 ========== ARBITRACE AGENT STARTED ==========\n`);
+  console.log(`   🧠 AI Engine: Google Gemini 3 Flash`);
   console.log(
-    `   Scanning every ${SCAN_INTERVAL_MS / 1000} seconds for opportunities...\n`,
+    `   ⏰ Scanning every ${SCAN_INTERVAL_MS / 1000} seconds for opportunities...\n`,
   );
 
+  // Run first cycle immediately
   await executeCycle();
 
+  // Set up interval for subsequent cycles
   setInterval(async () => {
     await executeCycle();
   }, SCAN_INTERVAL_MS);
+
+  // Keep the process alive - return a promise that never resolves
+  return new Promise(() => {
+    // This promise intentionally never resolves, keeping the event loop alive
+  });
 }

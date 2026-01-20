@@ -72,9 +72,6 @@ export async function main() {
       logger.warn(`Could not fund vault: ${error}`);
     }
 
-    console.log("🚀 ========== ARBITRACE AGENT STARTED ==========\n");
-    console.log("   Scanning every 30 seconds for opportunities...\n");
-
     await orchestratorLoop();
   } catch (error) {
     console.error("Fatal error:", error);
