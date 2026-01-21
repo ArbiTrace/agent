@@ -3,10 +3,21 @@ export async function main() {
     const { initializeSigner, getSigner, contracts, formatTokenAmount } = await import("./providers/contract-provider.js");
     const { AGENT_PRIVATE_KEY, CONTRACTS, validateConfig, logger } = await import("./config/config-prod.js");
     const { orchestratorLoop } = await import("./orchestrator-prod.js");
+    
+    // ========== ADD THESE IMPORTS ==========
+    const { startWebSocketServer, broadcastAgentStatus, inMemoryStore } = await import("./websocket-server.js");
+    // =======================================
 
     console.log("\n🚀 ========== ARBITRACE AGENT STARTING ==========\n");
 
     validateConfig();
+
+    // ========== START WEBSOCKET SERVER FIRST ==========
+    const WS_PORT = parseInt(process.env.WS_PORT || '3001');
+    startWebSocketServer(WS_PORT);
+    console.log(`\n🌐 WebSocket server started on port ${WS_PORT}`);
+    console.log(`   Frontend can connect at: ws://localhost:${WS_PORT}\n`);
+    // ==================================================
 
     const signer = await initializeSigner(AGENT_PRIVATE_KEY);
     const agentAddress = await signer.getAddress();
@@ -71,6 +82,39 @@ export async function main() {
     } catch (error) {
       logger.warn(`Could not fund vault: ${error}`);
     }
+
+    console.log("🚀 ========== ARBITRACE AGENT STARTED ==========\n");
+    console.log("   🧠 AI Engine: Google Gemini 3 Flash");
+    console.log("   ⏰ Scanning every 30 seconds for opportunities...\n");
+
+    // ========== SET INITIAL AGENT STATUS ==========
+    inMemoryStore.agentStatus.status = 'active';
+    inMemoryStore.agentStatus.uptime = Date.now();
+    inMemoryStore.agentStatus.aiEngine = 'Google Gemini 3 Flash';
+    broadcastAgentStatus();
+    // ==============================================
+
+    // ========== ADD GRACEFUL SHUTDOWN ==========
+    process.on('SIGINT', () => {
+      console.log('\n\n🛑 Received SIGINT (Ctrl+C)');
+      inMemoryStore.agentStatus.status = 'paused';
+      broadcastAgentStatus();
+      setTimeout(() => {
+        console.log('👋 Goodbye!\n');
+        process.exit(0);
+      }, 500);
+    });
+
+    process.on('SIGTERM', () => {
+      console.log('\n\n🛑 Received SIGTERM');
+      inMemoryStore.agentStatus.status = 'paused';
+      broadcastAgentStatus();
+      setTimeout(() => {
+        console.log('👋 Goodbye!\n');
+        process.exit(0);
+      }, 500);
+    });
+    // ===========================================
 
     await orchestratorLoop();
   } catch (error) {
