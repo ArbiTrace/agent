@@ -1,9 +1,9 @@
 export async function main() {
   try {
     const { initializeSigner, getSigner, contracts, formatTokenAmount } = await import("./providers/contract-provider.js");
-    const { AGENT_PRIVATE_KEY, CONTRACTS, validateConfig, logger } = await import("./config/config-prod.js");
+    const { AGENT_PRIVATE_KEY, CONTRACTS, RECIPIENT_ADDRESS, validateConfig, logger } = await import("./config/config-prod.js");
     const { orchestratorLoop } = await import("./orchestrator-prod.js");
-    
+
     // ========== ADD THESE IMPORTS ==========
     const { startWebSocketServer, broadcastAgentStatus, inMemoryStore } = await import("./websocket-server.js");
     // =======================================
@@ -26,7 +26,7 @@ export async function main() {
 
     try {
       const hre = global.hre;
-      
+
       // Get USDC balance (6 decimals!)
       const usdcContract = contracts.usdc();
       const usdcBalance = await usdcContract.balanceOf(agentAddress);
@@ -53,26 +53,27 @@ export async function main() {
 
     // FUND STRATEGY VAULT (ONE-TIME SETUP)
     console.log("💰 ========== CHECKING STRATEGY VAULT ==========\n");
-    
+
     try {
       const hre = global.hre;
       const vault = contracts.strategyVault();
-      const vaultBalance = await vault.balances(CONTRACTS.USDC);
-      
-      console.log(`   Vault USDC Balance: ${hre.ethers.formatEther(vaultBalance)} USDC`);
-      
+      const targetUser = inMemoryStore.connectedUser || RECIPIENT_ADDRESS;
+      const vaultBalance = await vault.userBalances(targetUser, CONTRACTS.USDC);
+
+      console.log(`   User (${targetUser}) Vault Balance: ${hre.ethers.formatEther(vaultBalance)} USDC`);
+
       const requiredBalance = hre.ethers.parseEther("100");
-      
+
       if (vaultBalance < requiredBalance) {
         console.log(`   ⚠️  Vault needs funding. Depositing 100 USDC...`);
-        
+
         const usdcContract = contracts.usdc();
         const depositAmount = hre.ethers.parseEther("100");
-        
+
         const approveTx = await usdcContract.approve(CONTRACTS.StrategyVault, depositAmount);
         await approveTx.wait();
         console.log(`   ✅ Vault approved`);
-        
+
         const depositTx = await vault.deposit(CONTRACTS.USDC, depositAmount);
         await depositTx.wait();
         console.log(`   ✅ Vault funded with 100 USDC\n`);

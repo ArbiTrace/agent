@@ -24,7 +24,7 @@ const DEX_ROUTER_ABI = [
 ];
 
 const ARBITRACE_ROUTER_ABI = [
-  "function executeStrategy(address tokenIn, uint256 amountIn, address[] calldata path, uint256 minAmountOut) external returns (bool)",
+  "function executeStrategy(address tokenIn, uint256 amountIn, address[] calldata path, uint256 minAmountOut, address user) external returns (bool)",
 ];
 
 const X402_SETTLER_ABI = [
@@ -33,7 +33,8 @@ const X402_SETTLER_ABI = [
 
 const STRATEGY_VAULT_ABI = [
   "function deposit(address token, uint256 amount) external",
-  "function balances(address token) external view returns (uint256)",
+  "function totalBalances(address token) external view returns (uint256)",
+  "function userBalances(address user, address token) external view returns (uint256)",
 ];
 
 // ============================================================
@@ -47,7 +48,7 @@ export async function initializeSigner(privateKey: string): Promise<any> {
     if (!hre || !hre.ethers) {
       throw new Error("Hardhat not initialized. Run via: npx hardhat agent");
     }
-    
+
     signer = new hre.ethers.Wallet(privateKey, hre.ethers.provider);
     logger.info(`✅ Signer initialized: ${await signer.getAddress()}`);
   }

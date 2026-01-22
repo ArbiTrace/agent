@@ -7,6 +7,7 @@ import { logger } from './config/config-prod.js';
 // ============================================================================
 
 export const inMemoryStore = {
+  connectedUser: null as string | null, // NEW: Track connected user from FE
   opportunities: [] as any[],
   trades: [] as any[],
   skippedTrades: [] as any[], // NEW: Track AI-rejected trades
@@ -45,7 +46,7 @@ let io: Server | null = null;
 
 export function startWebSocketServer(port: number = 3001) {
   const httpServer = createServer();
-  
+
   io = new Server(httpServer, {
     cors: {
       origin: process.env.FRONTEND_URL || 'http://localhost:5173',
@@ -79,6 +80,20 @@ export function startWebSocketServer(port: number = 3001) {
       logger.info('Agent stopped via frontend');
     });
 
+    socket.on('wallet:connected', (data: { address: string }) => {
+      if (data && data.address) {
+        logger.info(`👤 Wallet Connected: ${data.address}`);
+        inMemoryStore.connectedUser = data.address;
+        broadcastAgentStatus();
+      }
+    });
+
+    socket.on('wallet:disconnected', () => {
+      logger.info(`👤 Wallet Disconnected`);
+      inMemoryStore.connectedUser = null;
+      broadcastAgentStatus();
+    });
+
     socket.on('disconnect', () => {
       logger.info(`Frontend disconnected: ${socket.id}`);
     });
@@ -97,13 +112,13 @@ export function startWebSocketServer(port: number = 3001) {
 
 export function broadcastOpportunity(opportunity: any) {
   if (!io) return;
-  
+
   // Add to in-memory store
   inMemoryStore.opportunities.unshift(opportunity);
   if (inMemoryStore.opportunities.length > 50) {
     inMemoryStore.opportunities = inMemoryStore.opportunities.slice(0, 50);
   }
-  
+
   io.emit('opportunity:detected', opportunity);
 }
 
@@ -114,19 +129,19 @@ export function broadcastTradeExecuting(trade: any) {
 
 export function broadcastTradeCompleted(trade: any) {
   if (!io) return;
-  
+
   // Add to in-memory store
   inMemoryStore.trades.unshift(trade);
   if (inMemoryStore.trades.length > 100) {
     inMemoryStore.trades = inMemoryStore.trades.slice(0, 100);
   }
-  
+
   // Update stats
   inMemoryStore.agentStatus.totalTrades++;
   if (trade.status === 'success') {
     inMemoryStore.agentStatus.successfulTrades++;
   }
-  
+
   io.emit('trade:completed', trade);
   broadcastAgentStatus();
 }
@@ -134,14 +149,14 @@ export function broadcastTradeCompleted(trade: any) {
 // NEW: Broadcast AI-rejected trade
 export function broadcastTradeSkipped(data: any) {
   if (!io) return;
-  
+
   inMemoryStore.skippedTrades.unshift(data);
   if (inMemoryStore.skippedTrades.length > 50) {
     inMemoryStore.skippedTrades = inMemoryStore.skippedTrades.slice(0, 50);
   }
-  
+
   inMemoryStore.agentStatus.skippedTrades++;
-  
+
   io.emit('trade:skipped', data);
   broadcastAgentStatus();
 }
@@ -149,24 +164,24 @@ export function broadcastTradeSkipped(data: any) {
 // NEW: Broadcast AI decision
 export function broadcastAIDecision(decision: any) {
   if (!io) return;
-  
+
   inMemoryStore.aiInsights.lastDecision = decision;
-  
+
   // Calculate average confidence
   if (decision.confidence) {
     const recentDecisions = inMemoryStore.opportunities
       .filter((o: any) => o.aiDecision?.confidence)
       .slice(0, 10);
-    
+
     if (recentDecisions.length > 0) {
       const avgConfidence = recentDecisions.reduce(
-        (sum: number, o: any) => sum + o.aiDecision.confidence, 
+        (sum: number, o: any) => sum + o.aiDecision.confidence,
         0
       ) / recentDecisions.length;
       inMemoryStore.aiInsights.averageConfidence = avgConfidence;
     }
   }
-  
+
   io.emit('ai:decision', decision);
   io.emit('ai:insights', inMemoryStore.aiInsights);
 }
@@ -174,9 +189,9 @@ export function broadcastAIDecision(decision: any) {
 // NEW: Broadcast AI performance insights
 export function broadcastAIInsights(insights: string) {
   if (!io) return;
-  
+
   inMemoryStore.aiInsights.lastPerformanceAnalysis = insights;
-  
+
   io.emit('ai:insights', inMemoryStore.aiInsights);
 }
 

@@ -1,5 +1,5 @@
 import { contracts, getSigner } from "../providers/contract-provider.js";
-import { CONTRACTS, logger } from "../config/config-prod.js";
+import { CONTRACTS, RECIPIENT_ADDRESS, logger } from "../config/config-prod.js";
 
 export interface ExecutionResult {
   txHash: string;
@@ -16,14 +16,14 @@ export async function executeTrade(
 ): Promise<ExecutionResult> {
   try {
     const hre = global.hre;
-    
+
     // ===== DEBUG LOGGING =====
     logger.info(`🔍 DEBUG - Input Parameters:`);
     logger.info(`   tokenIn: ${tokenIn} (type: ${typeof tokenIn})`);
     logger.info(`   amountIn: ${amountIn} (type: ${typeof amountIn})`);
     logger.info(`   swapPath: ${JSON.stringify(swapPath)} (type: ${typeof swapPath}, isArray: ${Array.isArray(swapPath)})`);
     logger.info(`   minAmountOut: ${minAmountOut} (type: ${typeof minAmountOut})`);
-    
+
     // Validate addresses
     if (!hre.ethers.isAddress(tokenIn)) {
       throw new Error(`Invalid tokenIn address: ${tokenIn}`);
@@ -40,12 +40,26 @@ export async function executeTrade(
     );
 
     const arbiTraceRouter = contracts.arbiTraceRouter();
-    
+
+    // Use Connected User (Dynamic) -> Fallback to Env Recipient
+    let targetUser = RECIPIENT_ADDRESS;
+
+    // Check if we have a real user connected via WebSocket
+    const { inMemoryStore } = await import("../websocket-server.js");
+    if (inMemoryStore.connectedUser) {
+      targetUser = inMemoryStore.connectedUser;
+      logger.info(`🎯 Dynamic Target: Using Connected User: ${targetUser}`);
+    } else {
+      logger.warn(`⚠️ No user connected via WS. Fallback to ENV Recipient: ${targetUser}`);
+    }
+
+    logger.info(`🎯 Executing strategy for: ${targetUser}`);
+
     // ===== TRY ENCODING FIRST =====
     try {
       const encodedData = arbiTraceRouter.interface.encodeFunctionData(
         "executeStrategy",
-        [tokenIn, amountIn, swapPath, minAmountOut]
+        [tokenIn, amountIn, swapPath, minAmountOut, targetUser]
       );
       logger.info(`✅ Function encoding successful, data length: ${encodedData.length}`);
     } catch (encodeError) {
@@ -53,12 +67,13 @@ export async function executeTrade(
       throw encodeError;
     }
     // ===== END ENCODING TEST =====
-    
+
     const tx = await arbiTraceRouter.executeStrategy(
       tokenIn,
       amountIn,
       swapPath,
       minAmountOut,
+      targetUser,
       { gasLimit: 500_000 }
     );
 
@@ -91,9 +106,9 @@ export async function executeSettlement(
 ): Promise<string> {
   try {
     const hre = global.hre;
-    
+
     logger.info(`🚚 Executing settlement for ${hre.ethers.formatUnits(amount, 18)} of ${token}`);
-    
+
     // VALIDATE INPUTS
     if (!hre.ethers.isAddress(token)) {
       throw new Error(`Invalid token address: ${token}`);
@@ -107,7 +122,7 @@ export async function executeSettlement(
     if (!nonce || !nonce.startsWith('0x')) {
       throw new Error(`Invalid nonce format: ${nonce}`);
     }
-    
+
     // EXECUTE SETTLEMENT (matches simulate_trades.js line 120)
     // This moves CRO from ArbiTraceRouter contract → recipient wallet
     const x402Settler = contracts.x402Settler();
@@ -119,17 +134,17 @@ export async function executeSettlement(
       signature,
       { gasLimit: 300_000 }
     );
-    
+
     const receipt = await tx.wait();
-    
+
     // CHECK FOR REVERT
     if (!receipt || receipt.status === 0) {
       throw new Error(`Settlement reverted (status: ${receipt?.status})`);
     }
-    
+
     logger.info(`✅ Settlement: ${receipt.hash}`);
     return receipt.hash || receipt.transactionHash || "";
-    
+
   } catch (error) {
     logger.error(`Settlement failed: ${error}`);
     throw error;
