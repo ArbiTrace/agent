@@ -25,10 +25,11 @@ const DEX_ROUTER_ABI = [
 
 const ARBITRACE_ROUTER_ABI = [
   "function executeStrategy(address tokenIn, uint256 amountIn, address[] calldata path, uint256 minAmountOut, address user) external returns (bool)",
+  "function settleWithSplit(address tokenOut, uint256 totalAmount, address payable recipient) external",
 ];
 
 const X402_SETTLER_ABI = [
-  "function executeSettlementWithSig(address token, uint256 amount, address recipient, bytes32 nonce, bytes calldata signature) external returns (bool)",
+  "function executeSettlementWithSig(address token, uint256 amount, address recipient, bytes32 nonce, bytes signature) external returns (bool)",
 ];
 
 const STRATEGY_VAULT_ABI = [

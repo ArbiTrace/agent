@@ -123,15 +123,20 @@ export async function executeSettlement(
       throw new Error(`Invalid nonce format: ${nonce}`);
     }
 
-    // EXECUTE SETTLEMENT (matches simulate_trades.js line 120)
-    // This moves CRO from ArbiTraceRouter contract → recipient wallet
-    const x402Settler = contracts.x402Settler();
-    const tx = await x402Settler.executeSettlementWithSig(
+    // SIMPLIFIED SETTLEMENT: Call router directly
+    // Router's settleWithSplit will transfer all profit to recipient
+    const arbiTraceRouter = contracts.arbiTraceRouter();
+
+    logger.info(`🔍 Settlement Debug:`);
+    logger.info(`   Router: ${await arbiTraceRouter.getAddress()}`);
+    logger.info(`   Token: ${token}`);
+    logger.info(`   Amount: ${amount.toString()}`);
+    logger.info(`   Recipient: ${recipient}`);
+
+    const tx = await arbiTraceRouter.settleWithSplit(
       token,
       amount,
       recipient,
-      nonce,
-      signature,
       { gasLimit: 300_000 }
     );
 

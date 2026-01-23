@@ -1,5 +1,5 @@
 async function testDirectAPI() {
-  const apiKey = "";
+  const apiKey = "AIzaSyDJ1XKJ5jMYhLqDIMsRvdMRB4VWtiU-Nw0";
   
   if (!apiKey) {
     console.error("❌ GEMINI_API_KEY not set");

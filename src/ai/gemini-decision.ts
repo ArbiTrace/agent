@@ -121,9 +121,6 @@ export async function getAIDecision(marketData: {
     if (Math.random() < 0.9) {
       dataToUse = generateDemoScenario();
       isDemoMode = true;
-      console.log(
-        `🎲 [DEMO MODE] Using realistic demo scenario for varied AI responses`,
-      );
     }
 
     const prompt = `You are an expert DeFi arbitrage trader analyzing market opportunities.

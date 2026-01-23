@@ -11,38 +11,41 @@ export interface ValidationResult {
 }
 
 export async function validateTrade(
-  tokenA: string,
-  tokenB: string,
+  tokenA: string, // USDC
+  tokenB: string, // CRO
   amountIn: bigint,
   minOut: bigint,
-  maxExposure: number = 100
+  maxExposure: number = 100,
+  targetUser?: string
 ): Promise<ValidationResult> {
   try {
     const signer = getSigner();
-    const userAddress = await signer.getAddress();
+    const agentAddress = await signer.getAddress();
 
-    const usdc = contracts.usdc();
-    const userBalance = await usdc.balanceOf(userAddress);
+    let availableBalance = 0n;
 
-    const vvsRouterAddress = CONTRACTS.VVSRouter;
-    const currentAllowance = await usdc.allowance(userAddress, vvsRouterAddress);
+    if (targetUser) {
+      // Check User's Balance in the Strategy Vault
+      const vault = contracts.strategyVault();
+      availableBalance = await vault.userBalances(targetUser, tokenA);
+      logger.debug(`Checking Vault balance for ${targetUser}: ${ethers.formatUnits(availableBalance, 18)} USDC`);
+    } else {
+      // Fallback: Check Agent's Wallet Balance
+      const usdc = contracts.usdc();
+      availableBalance = await usdc.balanceOf(agentAddress);
+    }
 
     const issues: string[] = [];
     const warnings: string[] = [];
 
-    if (userBalance < amountIn) {
+    if (availableBalance < amountIn) {
       issues.push(
-        `Insufficient balance: ${ethers.formatEther(userBalance)} < ${ethers.formatEther(amountIn)}`
+        `Insufficient balance: ${ethers.formatUnits(availableBalance, 18)} < ${ethers.formatUnits(amountIn, 18)}`
       );
     }
 
-    if (currentAllowance < amountIn) {
-      warnings.push(
-        `Approval needed: ${ethers.formatEther(currentAllowance)} < ${ethers.formatEther(amountIn)}`
-      );
-    }
-
-    const portfolioExposure = (parseFloat(ethers.formatEther(amountIn)) / maxExposure) * 100;
+    // Exposure check
+    const portfolioExposure = (parseFloat(ethers.formatUnits(amountIn, 18)) / maxExposure) * 100;
     if (portfolioExposure > 50) {
       warnings.push(
         `High exposure: ${portfolioExposure.toFixed(2)}% of max (${maxExposure})`
@@ -57,6 +60,7 @@ export async function validateTrade(
     logger.debug(
       `Trade Validation: Risk=${riskScore.toFixed(0)}/100, Exposure=${portfolioExposure.toFixed(2)}%, Valid=${issues.length === 0}`
     );
+
 
     return {
       isValid: issues.length === 0,

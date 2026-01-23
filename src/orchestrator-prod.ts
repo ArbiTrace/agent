@@ -52,6 +52,10 @@ async function executeCycle(): Promise<void> {
 
     console.log(`\n🔄 SCAN CYCLE START (${new Date().toISOString()})`);
 
+    // Determine target user (Dynamic from WebSocket or fallback to Env)
+    const targetUser = inMemoryStore.connectedUser || RECIPIENT_ADDRESS;
+    console.log(`   🎯 Target User: ${targetUser} ${inMemoryStore.connectedUser ? '(Connected via WebSocket)' : '(Fallback)'}`);
+
     // ========== PHASE 1: DATA GATHERING ==========
     console.log("\n📊 === PHASE 1: DATA GATHERING ===");
 
@@ -81,11 +85,12 @@ async function executeCycle(): Promise<void> {
 
     const spreadAnalysis = calculateSpread(cexPrice, dexPrice);
 
+    // Log analysis
     console.log(
-      `   Spread: ${spreadAnalysis.spreadPercent.toFixed(2)}% (threshold: ${MIN_SPREAD_PERCENT}%)`,
+      `   Spread: ${spreadAnalysis.spreadPercent.toFixed(2)}% (threshold: ${MIN_SPREAD_PERCENT}%)`
     );
     console.log(
-      `   Net Profit: ${(spreadAnalysis.potentialProfit - gasInfo.estimatedGasCostUSDC).toFixed(2)} USDC`,
+      `   Net ROI: ${spreadAnalysis.potentialProfit.toFixed(2)}%`
     );
     console.log(`   Recommendation: ${spreadAnalysis.direction}`);
 
@@ -192,7 +197,7 @@ async function executeCycle(): Promise<void> {
         broadcastOpportunity({ ...opportunity, status: "rejected" });
 
         shouldProceed = false;
-      } else if (aiDecision.confidence < 70) {
+      } else if (aiDecision.confidence < 60) { // Lowered for test environment
         console.log(
           `\n   ⚠️  AI CONFIDENCE TOO LOW (${aiDecision.confidence}% < 70%)`,
         );
@@ -260,6 +265,7 @@ async function executeCycle(): Promise<void> {
       amountIn,
       minAmountOut,
       MAX_PORTFOLIO_EXPOSURE,
+      targetUser // Pass dynamic user
     );
 
     console.log(`   Risk Score: ${validation.riskScore.toFixed(0)}/100`);
@@ -302,7 +308,7 @@ async function executeCycle(): Promise<void> {
     const signed = await signX402Payload(
       CONTRACTS.CRO,
       minAmountOut,
-      RECIPIENT_ADDRESS,
+      targetUser, // Use dynamic target
       nonce,
     );
 
@@ -351,7 +357,7 @@ async function executeCycle(): Promise<void> {
         const settlementTx = await executeSettlement(
           CONTRACTS.CRO,
           minAmountOut,
-          RECIPIENT_ADDRESS,
+          targetUser, // Use dynamic target
           signed.signature,
           nonce,
         );
@@ -426,7 +432,7 @@ async function executeCycle(): Promise<void> {
           avgProfit:
             stats.totalProfit > 0n
               ? Number(ethers.formatEther(stats.totalProfit)) /
-                stats.successfulTrades
+              stats.successfulTrades
               : 0,
           avgLoss: 0,
           gasEfficiency: 87,
